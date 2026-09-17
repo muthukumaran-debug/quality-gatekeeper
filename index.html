@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated Code Quality Gatekeeper</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gate: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            accent: '#58a6ff',
+                            success: '#238636',
+                            warning: '#d29922',
+                            danger: '#da3633',
+                            purple: '#8957e5'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #c9d1d9;
+        }
+
+        code, pre, .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+
+        .glow-accent {
+            box-shadow: 0 0 15px rgba(88, 166, 255, 0.15);
+        }
+        
+        .glow-success {
+            box-shadow: 0 0 15px rgba(35, 134, 54, 0.2);
+        }
+
+        .glow-danger {
+            box-shadow: 0 0 15px rgba(218, 54, 51, 0.2);
+        }
+
+        .pipeline-node {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col bg-[#0d1117] text-[#c9d1d9]">
+
+    <!-- Top Navigation Header -->
+    <header class="border-b border-[#30363d] bg-[#161b22] sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <!-- Branding -->
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/20">
+                        <i class="fa-solid fa-[#000] fa-shield-halved text-xl"></i>
+                    </div>
+                    <div>
+                        <span class="font-bold text-lg text-white tracking-wide block leading-none">GATEKEEPER CI/CD</span>
+                        <span class="text-xs text-gray-400 font-mono">v3.4.2 • Static Analysis & Gate Enforcement</span>
+                    </div>
+                </div>
+
+                <!-- Navigation Tabs -->
+                <nav class="hidden md:flex space-x-1" id="nav-tabs">
+                    <button onclick="switchTab('overview')" id="tab-overview" class="nav-btn active px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 text-white bg-[#21262d] border border-[#30363d]">
+                        <i class="fa-solid fa-sitemap text-blue-400"></i> Architecture
+                    </button>
+                    <button onclick="switchTab('pipeline')" id="tab-pipeline" class="nav-btn px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-[#21262d]">
+                        <i class="fa-solid fa-flask text-emerald-400"></i> Live Simulator
+                    </button>
+                    <button onclick="switchTab('linters')" id="tab-linters" class="nav-btn px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-[#21262d]">
+                        <i class="fa-solid fa-sliders text-purple-400"></i> Rule Engine
+                    </button>
+                    <button onclick="switchTab('metrics')" id="tab-metrics" class="nav-btn px-4 py-2 rounded-md text-sm font-medium transition-colors flex items-center gap-2 text-gray-400 hover:text-white hover:bg-[#21262d]">
+                        <i class="fa-solid fa-chart-line text-amber-400"></i> Analytics
+                    </button>
+                </nav>
+
+                <!-- Status & Action Buttons -->
+                <div class="flex items-center space-x-3">
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
+                        GATE ACTIVE
+                    </span>
+                    <button onclick="triggerNotification('Manual sync requested. Checking policies...')" class="p-2 rounded-md bg-[#21262d] border border-[#30363d] text-gray-300 hover:text-white hover:bg-[#30363d] transition-colors">
+                        <i class="fa-solid fa-rotate"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Navigation Menu -->
+        <div class="md:hidden border-t border-[#30363d] bg-[#161b22] px-2 py-2 flex justify-around">
+            <button onclick="switchTab('overview')" class="text-xs p-2 text-gray-300 flex flex-col items-center">
+                <i class="fa-solid fa-sitemap mb-1 text-blue-400"></i> Visuals
+            </button>
+            <button onclick="switchTab('pipeline')" class="text-xs p-2 text-gray-300 flex flex-col items-center">
+                <i class="fa-solid fa-flask mb-1 text-emerald-400"></i> Simulator
+            </button>
+            <button onclick="switchTab('linters')" class="text-xs p-2 text-gray-300 flex flex-col items-center">
+                <i class="fa-solid fa-sliders mb-1 text-purple-400"></i> Rules
+            </button>
+            <button onclick="switchTab('metrics')" class="text-xs p-2 text-gray-300 flex flex-col items-center">
+                <i class="fa-solid fa-chart-line mb-1 text-amber-400"></i> Metrics
+            </button>
+        </div>
+    </header>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <!-- Main Dynamic Content Container -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- VIEW 1: OVERVIEW & ARCHITECTURE -->
+        <section id="view-overview" class="space-y-8">
+            <!-- Hero Banner -->
+            <div class="relative overflow-hidden rounded-xl bg-gradient-to-r from-[#161b22] via-[#1c2128] to-[#161b22] border border-[#30363d] p-8 shadow-2xl">
+                <div class="absolute -right-10 -bottom-10 opacity-10 pointer-events-none text-blue-500">
+                    <i class="fa-solid fa-shield-halved text-[220px]"></i>
+                </div>
+                <div class="max-w-3xl relative z-10">
+                    <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-mono font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-4">
+                        <i class="fa-solid fa-shield-cat"></i> CI/CD Enforcement System
+                    </span>
+                    <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+                        Automated Code Quality Gatekeeper
+                    </h1>
+                    <p class="mt-3 text-base text-gray-400 leading-relaxed">
+                        Enforcing strict quality gates across your software development lifecycle. Block vulnerabilities, formatting regressions, anti-patterns, and coverage drops directly in the pull request phase.
+                    </p>
+                    <div class="mt-6 flex flex-wrap gap-4">
+                        <button onclick="switchTab('pipeline')" class="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center gap-2">
+                            <i class="fa-solid fa-play"></i> Test Gate Simulator
+                        </button>
+                        <button onclick="switchTab('linters')" class="px-5 py-2.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] text-gray-200 border border-[#30363d] font-medium text-sm transition-all flex items-center gap-2">
+                            <i class="fa-solid fa-gear"></i> Configure Linter Rules
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pipeline Visual Flow Diagram -->
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-diagram-project text-blue-400"></i> CI/CD Gatekeeper Architecture Flow
+                        </h2>
+                        <p class="text-xs text-gray-400">Sequential stages evaluated before code merge is authorized</p>
+                    </div>
+                    <span class="text-xs font-mono bg-[#21262d] text-gray-300 px-3 py-1 rounded border border-[#30363d]">Automated PR Check</span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-7 gap-3 relative">
+                    <!-- Stage 1 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-blue-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-code-commit"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">STAGE 1</span>
+                        <h3 class="font-semibold text-sm text-white">Git Commit</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">Pre-commit git hooks execution</p>
+                    </div>
+
+                    <!-- Stage 2 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-purple-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-purple-500/10 text-purple-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-spell-check"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">STAGE 2</span>
+                        <h3 class="font-semibold text-sm text-white">Code Linting</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">ESLint, Flake8 syntax checks</p>
+                    </div>
+
+                    <!-- Stage 3 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-cyan-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-cyan-500/10 text-cyan-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-magnifying-glass-chart"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">STAGE 3</span>
+                        <h3 class="font-semibold text-sm text-white">Static Analysis</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">SonarQube & Semgrep AST scan</p>
+                    </div>
+
+                    <!-- Stage 4 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-red-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-bug"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">STAGE 4</span>
+                        <h3 class="font-semibold text-sm text-white">SAST Security</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">Secret scanning & dependency audit</p>
+                    </div>
+
+                    <!-- Stage 5 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-amber-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-vial"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">STAGE 5</span>
+                        <h3 class="font-semibold text-sm text-white">Unit Tests</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">Test suite & code coverage check</p>
+                    </div>
+
+                    <!-- Stage 6 -->
+                    <div class="bg-[#0d1117] border border-amber-500/40 rounded-lg p-4 flex flex-col items-center text-center glow-accent">
+                        <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-[#000] fa-shield"></i>
+                        </div>
+                        <span class="text-xs font-mono text-emerald-400">GATEKEEPER</span>
+                        <h3 class="font-semibold text-sm text-white">Policy Decision</h3>
+                        <p class="text-[11px] text-gray-400 mt-1">Evaluates quality threshold thresholds</p>
+                    </div>
+
+                    <!-- Stage 7 -->
+                    <div class="bg-[#0d1117] border border-[#30363d] rounded-lg p-4 flex flex-col items-center text-center hover:border-emerald-500/50 transition-colors">
+                        <div class="w-10 h-10 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2">
+                            <i class="fa-solid fa-rocket"></i>
+                        </div>
+                        <span class="text-xs font-mono text-gray-400">FINAL</span>
+                        <h3 class="font-semibold text-sm text-white">Merge & Deploy</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">Approved code merged to main</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Key Enforcement Pillars Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- Pillar 1 -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="w-12 h-12 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 text-xl mb-4">
+                            <i class="fa-solid fa-code"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-white mb-2">1. Linting Enforcement</h3>
+                        <p class="text-sm text-gray-400 leading-relaxed">
+                            Prevents syntax flaws, enforce code consistency, and eliminates code smells using rigid linters prior to build steps.
+                        </p>
+                    </div>
+                    <ul class="mt-4 space-y-2 text-xs font-mono text-gray-300 border-t border-[#30363d] pt-4">
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> ESLint / Prettier Rules</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Flake8 & Black Formatting</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Static Type Checking</li>
+                    </ul>
+                </div>
+
+                <!-- Pillar 2 -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="w-12 h-12 rounded-lg bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 text-xl mb-4">
+                            <i class="fa-solid fa-microchip"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-white mb-2">2. Static Code Analysis</h3>
+                        <p class="text-sm text-gray-400 leading-relaxed">
+                            Deep AST (Abstract Syntax Tree) inspection to discover architectural flaws, memory leaks, and complex cognitive loops.
+                        </p>
+                    </div>
+                    <ul class="mt-4 space-y-2 text-xs font-mono text-gray-300 border-t border-[#30363d] pt-4">
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Cognitive Complexity Caps</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Duplicate Code Detection</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Dead Code Elimination</li>
+                    </ul>
+                </div>
+
+                <!-- Pillar 3 -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <div class="w-12 h-12 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 text-xl mb-4">
+                            <i class="fa-solid fa-lock"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-white mb-2">3. Security Gatekeeper</h3>
+                        <p class="text-sm text-gray-400 leading-relaxed">
+                            Scan PRs for hardcoded secrets, API keys, vulnerable dependencies, and OWASP Top 10 security threats.
+                        </p>
+                    </div>
+                    <ul class="mt-4 space-y-2 text-xs font-mono text-gray-300 border-t border-[#30363d] pt-4">
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Secret & Token Detection</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Dependency Vulnerability Audit</li>
+                        <li class="flex items-center gap-2"><i class="fa-solid fa-check text-emerald-400"></i> Strict Merge Block Policy</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 2: LIVE PIPELINE SIMULATOR -->
+        <section id="view-pipeline" class="space-y-6 hidden">
+            <!-- Simulator Control Toolbar -->
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fa-solid fa-flask text-emerald-400"></i> Live CI/CD Pipeline Simulator
+                    </h2>
+                    <p class="text-xs text-gray-400">Simulate pull requests and test how gatekeeper rules respond to code quality variations.</p>
+                </div>
+                
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <button id="btn-run-pipeline" onclick="runPipelineSimulation()" class="flex-1 md:flex-initial px-6 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-sm transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-play"></i> Trigger Pipeline Run
+                    </button>
+                    <button onclick="toggleErrorInjection()" id="btn-inject-error" class="px-4 py-2.5 rounded-lg bg-[#21262d] border border-[#30363d] text-gray-300 hover:text-white font-medium text-sm transition-all flex items-center gap-2">
+                        <i class="fa-solid fa-bug text-red-400"></i> Inject Defect: <span id="inject-status" class="text-emerald-400 font-mono">OFF</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Pipeline Visual Nodes -->
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Pipeline Execution Stages</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3" id="pipeline-stages-container">
+                    <!-- Stage Nodes rendered via JS -->
+                </div>
+            </div>
+
+            <!-- Terminal Output & Logs Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Live Console Stream -->
+                <div class="lg:col-span-2 bg-[#0d1117] border border-[#30363d] rounded-xl overflow-hidden flex flex-col h-96 shadow-xl">
+                    <div class="bg-[#161b22] px-4 py-3 border-b border-[#30363d] flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
+                            <span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span>
+                            <span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span>
+                            <span class="text-xs font-mono text-gray-400 ml-2">ci-gatekeeper-runner.log</span>
+                        </div>
+                        <button onclick="clearConsole()" class="text-xs text-gray-400 hover:text-white font-mono flex items-center gap-1">
+                            <i class="fa-solid fa-trash-can"></i> Clear
+                        </button>
+                    </div>
+                    <div id="console-output" class="p-4 font-mono text-xs overflow-y-auto flex-grow space-y-1.5 text-gray-300 bg-[#06090e]">
+                        <div class="text-gray-500">[SYSTEM READY] Pipeline simulator initialized. Click "Trigger Pipeline Run" to start.</div>
+                    </div>
+                </div>
+
+                <!-- Gatekeeper Policy Summary Card -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 flex flex-col justify-between">
+                    <div>
+                        <h3 class="text-base font-bold text-white mb-4 flex items-center gap-2">
+                            <i class="fa-solid fa-scale-balanced text-purple-400"></i> Gate Decision Engine
+                        </h3>
+                        
+                        <div class="space-y-4">
+                            <div class="p-3 rounded-lg bg-[#0d1117] border border-[#30363d]">
+                                <span class="text-xs text-gray-400 block mb-1">Gatekeeper Verdict</span>
+                                <div id="gate-verdict" class="text-lg font-bold font-mono text-gray-400 flex items-center gap-2">
+                                    <i class="fa-solid fa-circle-question"></i> WAITING FOR RUN
+                                </div>
+                            </div>
+
+                            <div class="space-y-2 text-xs">
+                                <div class="flex justify-between items-center py-1.5 border-b border-[#30363d]">
+                                    <span class="text-gray-400">Lint Errors Allowed</span>
+                                    <span class="font-mono text-white font-bold">0</span>
+                                </div>
+                                <div class="flex justify-between items-center py-1.5 border-b border-[#30363d]">
+                                    <span class="text-gray-400">Min Unit Test Coverage</span>
+                                    <span class="font-mono text-white font-bold">85%</span>
+                                </div>
+                                <div class="flex justify-between items-center py-1.5 border-b border-[#30363d]">
+                                    <span class="text-gray-400">Max Critical Bugs</span>
+                                    <span class="font-mono text-white font-bold">0</span>
+                                </div>
+                                <div class="flex justify-between items-center py-1.5 border-b border-[#30363d]">
+                                    <span class="text-gray-400">Secrets Exposed Limit</span>
+                                    <span class="font-mono text-white font-bold">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 pt-4 border-t border-[#30363d]">
+                        <p class="text-[11px] text-gray-500 leading-tight">
+                            Note: If any stage fails the criteria above, the Gatekeeper automatically blocks merge permissions in GitHub/GitLab.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 3: RULE ENGINE & LINTER CONFIGURATOR -->
+        <section id="view-linters" class="space-y-6 hidden">
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                    <div>
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-sliders text-purple-400"></i> Linter & Static Analysis Rule Engine
+                        </h2>
+                        <p class="text-xs text-gray-400">Customize quality rules and generate production-ready configurations.</p>
+                    </div>
+
+                    <!-- Preset Picker -->
+                    <div class="flex items-center space-x-2">
+                        <label class="text-xs text-gray-400 font-mono">Target Stack:</label>
+                        <select id="linter-stack-select" onchange="updateLinterConfig()" class="bg-[#0d1117] border border-[#30363d] text-white text-xs rounded-lg p-2.5 focus:border-blue-500 font-mono">
+                            <option value="javascript">JavaScript / TypeScript (ESLint)</option>
+                            <option value="python">Python (Flake8 & Black)</option>
+                            <option value="sonarqube">SonarQube (Sonar-Project)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Rule Toggles Form -->
+                    <div class="space-y-4 bg-[#0d1117] p-5 rounded-xl border border-[#30363d]">
+                        <h3 class="text-sm font-bold text-white uppercase tracking-wider mb-3 pb-2 border-b border-[#30363d] flex items-center justify-between">
+                            <span>Rule Enforcement Toggles</span>
+                            <span class="text-xs text-blue-400 font-normal">Interactive</span>
+                        </h3>
+
+                        <div class="space-y-3" id="rule-toggles-container">
+                            <!-- Populated dynamically via JS based on stack selection -->
+                        </div>
+                    </div>
+
+                    <!-- Live Config Generator Output -->
+                    <div class="flex flex-col h-full bg-[#0d1117] rounded-xl border border-[#30363d] overflow-hidden">
+                        <div class="bg-[#161b22] px-4 py-3 border-b border-[#30363d] flex items-center justify-between">
+                            <span class="text-xs font-mono text-gray-300 font-bold" id="config-filename">.eslintrc.json</span>
+                            <button onclick="copyGeneratedConfig()" class="px-3 py-1 rounded bg-[#21262d] hover:bg-[#30363d] text-xs font-mono text-blue-400 border border-[#30363d] transition-colors flex items-center gap-1.5">
+                                <i class="fa-solid fa-copy"></i> Copy Config
+                            </button>
+                        </div>
+                        <pre id="config-code-display" class="p-4 text-xs font-mono text-emerald-400 overflow-x-auto flex-grow bg-[#06090e]"></pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 4: METRICS & ANALYTICS DASHBOARD -->
+        <section id="view-metrics" class="space-y-6 hidden">
+            <!-- Top Stat KPI Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                    <span class="text-xs text-gray-400 font-medium">Overall Code Health</span>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span class="text-3xl font-extrabold text-emerald-400 font-mono">94.8%</span>
+                        <span class="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">+2.4%</span>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-2">Target threshold: ≥ 90.0%</p>
+                </div>
+
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                    <span class="text-xs text-gray-400 font-medium">PR Gate Success Rate</span>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span class="text-3xl font-extrabold text-blue-400 font-mono">88.2%</span>
+                        <span class="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">+1.1%</span>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-2">Based on last 120 pipeline runs</p>
+                </div>
+
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                    <span class="text-xs text-gray-400 font-medium">Blocked Security Flaws</span>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span class="text-3xl font-extrabold text-amber-400 font-mono">42</span>
+                        <span class="text-xs font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">-8 bugs</span>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-2">Prevented from merging to main</p>
+                </div>
+
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                    <span class="text-xs text-gray-400 font-medium">Avg Gate Check Time</span>
+                    <div class="flex items-baseline justify-between mt-2">
+                        <span class="text-3xl font-extrabold text-purple-400 font-mono">1m 42s</span>
+                        <span class="text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">-14s</span>
+                    </div>
+                    <p class="text-[11px] text-gray-500 mt-2">Optimized with parallel lint jobs</p>
+                </div>
+            </div>
+
+            <!-- Charts Grid -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- Chart 1: Code Quality & Health Index Over Time -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                    <h3 class="text-base font-bold text-white mb-1">Code Quality Index Over Time</h3>
+                    <p class="text-xs text-gray-400 mb-4">Historical progression of maintainability and test coverage</p>
+                    <div class="h-64 relative">
+                        <canvas id="chart-quality-trend"></canvas>
+                    </div>
+                </div>
+
+                <!-- Chart 2: Issues Blocked by Category -->
+                <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                    <h3 class="text-base font-bold text-white mb-1">Defects Intercepted by Gatekeeper</h3>
+                    <p class="text-xs text-gray-400 mb-4">Distribution of issues blocked during PR checks</p>
+                    <div class="h-64 relative flex items-center justify-center">
+                        <canvas id="chart-issues-distribution"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-[#30363d] bg-[#161b22] py-6 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-gray-500">
+            <div class="flex items-center space-x-2">
+                <i class="fa-solid fa-shield-halved text-blue-500"></i>
+                <span>Automated Code Quality Gatekeeper Architecture</span>
+            </div>
+            <div>
+                <span>CI/CD Pipeline Security & Quality Enforcement Specification</span>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // Active Tab Switcher Logic
+        function switchTab(tabId) {
+            // Hide all views
+            ['overview', 'pipeline', 'linters', 'metrics'].forEach(id => {
+                document.getElementById(`view-${id}`).classList.add('hidden');
+                const btn = document.getElementById(`tab-${id}`);
+                if (btn) {
+                    btn.classList.remove('text-white', 'bg-[#21262d]', 'border', 'border-[#30363d]');
+                    btn.classList.add('text-gray-400');
+                }
+            });
+
+            // Show selected view
+            const selectedView = document.getElementById(`view-${tabId}`);
+            if (selectedView) {
+                selectedView.classList.remove('hidden');
+            }
+
+            // Highlight active tab button
+            const activeBtn = document.getElementById(`tab-${tabId}`);
+            if (activeBtn) {
+                activeBtn.classList.add('text-white', 'bg-[#21262d]', 'border', 'border-[#30363d]');
+                activeBtn.classList.remove('text-gray-400');
+            }
+
+            // Trigger Chart renders if metrics tab is visited
+            if (tabId === 'metrics') {
+                initCharts();
+            }
+        }
+
+        function triggerNotification(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let bgClass = 'bg-[#161b22] border-blue-500 text-blue-400';
+            let icon = 'fa-circle-info';
+            
+            if (type === 'success') {
+                bgClass = 'bg-[#161b22] border-emerald-500 text-emerald-400';
+                icon = 'fa-circle-check';
+            } else if (type === 'error') {
+                bgClass = 'bg-[#161b22] border-red-500 text-red-400';
+                icon = 'fa-triangle-exclamation';
+            }
+
+            toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-lg border shadow-xl text-xs font-mono transition-all duration-300 transform translate-y-2 opacity-0 ${bgClass}`;
+            toast.innerHTML = `<i class="fa-solid ${icon} text-base"></i> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        const stagesData = [
+            { id: 'commit', name: 'Git Commit', icon: 'fa-code-commit' },
+            { id: 'lint', name: 'Code Linting', icon: 'fa-spell-check' },
+            { id: 'static', name: 'Static Analysis', icon: 'fa-magnifying-glass-chart' },
+            { id: 'security', name: 'SAST Security', icon: 'fa-bug' },
+            { id: 'tests', name: 'Unit Tests', icon: 'fa-vial' },
+            { id: 'gate', name: 'Gate Decision', icon: 'fa-shield' }
+        ];
+
+        let injectError = false;
+        let isPipelineRunning = false;
+
+        function renderPipelineNodes() {
+            const container = document.getElementById('pipeline-stages-container');
+            container.innerHTML = stagesData.map((stage, idx) => `
+                <div id="node-${stage.id}" class="pipeline-node bg-[#0d1117] border border-[#30363d] rounded-lg p-3 flex flex-col items-center justify-center text-center h-24">
+                    <i class="fa-solid ${stage.icon} text-gray-500 text-xl mb-1" id="icon-${stage.id}"></i>
+                    <span class="text-xs font-medium text-gray-300">${stage.name}</span>
+                    <span class="text-[10px] font-mono text-gray-500 mt-1" id="status-${stage.id}">IDLE</span>
+                </div>
+            `).join('');
+        }
+
+        function toggleErrorInjection() {
+            injectError = !injectError;
+            const statusEl = document.getElementById('inject-status');
+            const btn = document.getElementById('btn-inject-error');
+            
+            if (injectError) {
+                statusEl.textContent = 'ON (ESLint Failure)';
+                statusEl.className = 'text-red-400 font-mono font-bold';
+                btn.classList.add('border-red-500/50');
+                triggerNotification('Defect Injection Enabled: Pipeline will fail at Linting Stage', 'error');
+            } else {
+                statusEl.textContent = 'OFF';
+                statusEl.className = 'text-emerald-400 font-mono';
+                btn.classList.remove('border-red-500/50');
+                triggerNotification('Defect Injection Disabled', 'info');
+            }
+        }
+
+        function appendLog(msg, level = 'info') {
+            const consoleEl = document.getElementById('console-output');
+            const logRow = document.createElement('div');
+            const time = new Date().toISOString().substring(11, 19);
+
+            let color = 'text-gray-300';
+            if (level === 'success') color = 'text-emerald-400 font-semibold';
+            if (level === 'error') color = 'text-red-400 font-semibold';
+            if (level === 'warn') color = 'text-amber-400';
+
+            logRow.className = `${color} leading-relaxed`;
+            logRow.innerHTML = `<span class="text-gray-600">[${time}]</span> ${msg}`;
+            consoleEl.appendChild(logRow);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        function clearConsole() {
+            document.getElementById('console-output').innerHTML = '<div class="text-gray-500">[CONSOLE CLEARED] Ready for next run.</div>';
+        }
+
+        async function runPipelineSimulation() {
+            if (isPipelineRunning) return;
+            isPipelineRunning = true;
+
+            const runBtn = document.getElementById('btn-run-pipeline');
+            runBtn.disabled = true;
+            runBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            renderPipelineNodes();
+            clearConsole();
+            
+            appendLog('Triggering pipeline build #1049 on branch: feature/payment-gateway...', 'info');
+            
+            const verdictEl = document.getElementById('gate-verdict');
+            verdictEl.className = 'text-lg font-bold font-mono text-amber-400 flex items-center gap-2';
+            verdictEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> EVALUATING GATE...';
+
+            let failedAt = null;
+
+            for (let i = 0; i < stagesData.length; i++) {
+                const stage = stagesData[i];
+                const node = document.getElementById(`node-${stage.id}`);
+                const icon = document.getElementById(`icon-${stage.id}`);
+                const status = document.getElementById(`status-${stage.id}`);
+
+                // Set Active State
+                node.className = 'pipeline-node bg-[#0d1117] border border-blue-500 rounded-lg p-3 flex flex-col items-center justify-center text-center h-24 glow-accent';
+                icon.className = `fa-solid ${stage.icon} text-blue-400 text-xl mb-1 fa-bounce`;
+                status.textContent = 'RUNNING';
+                status.className = 'text-[10px] font-mono text-blue-400 font-bold';
+
+                appendLog(`Executing stage [${i+1}/6]: ${stage.name}...`, 'info');
+                await new Promise(r => setTimeout(r, 900));
+
+                // Check Error Injection at Lint stage
+                if (stage.id === 'lint' && injectError) {
+                    failedAt = stage;
+                    node.className = 'pipeline-node bg-[#0d1117] border border-red-500 rounded-lg p-3 flex flex-col items-center justify-center text-center h-24 glow-danger';
+                    icon.className = `fa-solid ${stage.icon} text-red-500 text-xl mb-1`;
+                    status.textContent = 'FAILED';
+                    status.className = 'text-[10px] font-mono text-red-500 font-bold';
+
+                    appendLog('ERROR: ESLint discovered 3 syntax errors:', 'error');
+                    appendLog('  - src/auth.ts:42: Unused variable "secretToken" (no-unused-vars)', 'error');
+                    appendLog('  - src/auth.ts:89: Expected === and instead saw == (eqeqeq)', 'error');
+                    appendLog('Gatekeeper Policy Triggered: Automated merge blocked due to quality failure.', 'error');
+                    break;
+                } else {
+                    // Stage Passed
+                    node.className = 'pipeline-node bg-[#0d1117] border border-emerald-500/50 rounded-lg p-3 flex flex-col items-center justify-center text-center h-24';
+                    icon.className = `fa-solid ${stage.icon} text-emerald-400 text-xl mb-1`;
+                    status.textContent = 'PASSED';
+                    status.className = 'text-[10px] font-mono text-emerald-400';
+
+                    if (stage.id === 'commit') appendLog('✔ Git commit signature and pre-commit hooks passed.', 'success');
+                    if (stage.id === 'lint') appendLog('✔ Linting clean. 0 syntax errors, 0 style warnings.', 'success');
+                    if (stage.id === 'static') appendLog('✔ Static analysis complete. Cognitive complexity = 4 (Limit: 15).', 'success');
+                    if (stage.id === 'security') appendLog('✔ Security scan clean. 0 hardcoded secrets or CVE vulnerabilities found.', 'success');
+                    if (stage.id === 'tests') appendLog('✔ 48/48 Unit tests passed. Code coverage: 92.4% (Threshold: 85%).', 'success');
+                    if (stage.id === 'gate') appendLog('✔ Quality Gatekeeper Decision: PR APPROVED FOR MERGE.', 'success');
+                }
+            }
+
+            if (failedAt) {
+                verdictEl.className = 'text-lg font-bold font-mono text-red-500 flex items-center gap-2';
+                verdictEl.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> MERGE REJECTED';
+                triggerNotification('Pipeline Gate Decision: REJECTED', 'error');
+            } else {
+                verdictEl.className = 'text-lg font-bold font-mono text-emerald-400 flex items-center gap-2';
+                verdictEl.innerHTML = '<i class="fa-solid fa-circle-check"></i> MERGE APPROVED';
+                triggerNotification('Pipeline Gate Decision: PASSED & APPROVED', 'success');
+            }
+
+            runBtn.disabled = false;
+            runBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            isPipelineRunning = false;
+        }
+
+        const linterRulesMap = {
+            javascript: {
+                file: '.eslintrc.json',
+                rules: [
+                    { id: 'eqeqeq', label: 'Enforce strict equality (===)', default: true },
+                    { id: 'no-unused-vars', label: 'Disallow unused variables', default: true },
+                    { id: 'no-console', label: 'Block console.log statements', default: false },
+                    { id: 'curly', label: 'Require curly braces for all control statements', default: true }
+                ]
+            },
+            python: {
+                file: '.flake8',
+                rules: [
+                    { id: 'max-line-length', label: 'Strict line length limit (88 chars)', default: true },
+                    { id: 'ignore-F401', label: 'Flag unused imports (F401)', default: true },
+                    { id: 'disallow-bare-except', label: 'Block bare except clauses (E722)', default: true }
+                ]
+            },
+            sonarqube: {
+                file: 'sonar-project.properties',
+                rules: [
+                    { id: 'sonar.coverage.exclusions', label: 'Enforce 85%+ coverage gate threshold', default: true },
+                    { id: 'sonar.cpd.exclusions', label: 'Block duplicate code blocks (> 3%)', default: true },
+                    { id: 'sonar.security.scan', label: 'Enable OWASP SAST Vulnerability Rules', default: true }
+                ]
+            }
+        };
+
+        function updateLinterConfig() {
+            const stack = document.getElementById('linter-stack-select').value;
+            const container = document.getElementById('rule-toggles-container');
+            const data = linterRulesMap[stack];
+
+            document.getElementById('config-filename').textContent = data.file;
+
+            container.innerHTML = data.rules.map(rule => `
+                <div class="flex items-center justify-between p-3 rounded-lg bg-[#161b22] border border-[#30363d]">
+                    <span class="text-xs text-gray-300 font-medium">${rule.label}</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="rule-${rule.id}" ${rule.default ? 'checked' : ''} onchange="generateConfigFile()" class="sr-only peer">
+                        <div class="w-9 h-5 bg-[#30363d] peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+            `).join('');
+
+            generateConfigFile();
+        }
+
+        function generateConfigFile() {
+            const stack = document.getElementById('linter-stack-select').value;
+            const display = document.getElementById('config-code-display');
+            
+            if (stack === 'javascript') {
+                const eqeqeq = document.getElementById('rule-eqeqeq')?.checked;
+                const noUnused = document.getElementById('rule-no-unused-vars')?.checked;
+                const noConsole = document.getElementById('rule-no-console')?.checked;
+                const curly = document.getElementById('rule-curly')?.checked;
+
+                const config = {
+                    "env": { "browser": true, "es2021": true, "node": true },
+                    "extends": ["eslint:recommended"],
+                    "parserOptions": { "ecmaVersion": 12, "sourceType": "module" },
+                    "rules": {
+                        "eqeqeq": eqeqeq ? ["error", "always"] : "off",
+                        "no-unused-vars": noUnused ? ["error", { "args": "all" }] : "warn",
+                        "no-console": noConsole ? "error" : "off",
+                        "curly": curly ? ["error", "all"] : "off"
+                    }
+                };
+                display.textContent = JSON.stringify(config, null, 2);
+            } else if (stack === 'python') {
+                const lineLen = document.getElementById('rule-max-line-length')?.checked;
+                const f401 = document.getElementById('rule-ignore-F401')?.checked;
+                const e722 = document.getElementById('rule-disallow-bare-except')?.checked;
+
+                display.textContent = `[flake8]\nmax-line-length = ${lineLen ? '88' : '120'}\nselect = E,F,W,C\nignore = ${f401 ? '' : 'F401,'} ${e722 ? '' : 'E722'}\nexclude = .git,__pycache__,build,dist`;
+            } else if (stack === 'sonarqube') {
+                display.textContent = `sonar.projectKey=code-gatekeeper-app\nsonar.projectName=Automated Code Quality Gatekeeper\nsonar.sources=src\nsonar.tests=tests\nsonar.qualitygate.wait=true\nsonar.coverage.minimum=${document.getElementById('rule-sonar.coverage.exclusions')?.checked ? '85' : '70'}`;
+            }
+        }
+
+        function copyGeneratedConfig() {
+            const text = document.getElementById('config-code-display').textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                triggerNotification('Config copied to clipboard!', 'success');
+            }).catch(() => {
+                triggerNotification('Failed to copy text', 'error');
+            });
+        }
+
+        let chartsInitialized = false;
+
+        function initCharts() {
+            if (chartsInitialized) return;
+            chartsInitialized = true;
+
+            // Chart 1: Quality Trend
+            const ctx1 = document.getElementById('chart-quality-trend').getContext('2d');
+            new Chart(ctx1, {
+                type: 'line',
+                data: {
+                    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+                    datasets: [
+                        {
+                            label: 'Code Quality Index (%)',
+                            data: [82, 85, 84, 89, 91, 93, 95],
+                            borderColor: '#58a6ff',
+                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Test Coverage (%)',
+                            data: [75, 78, 80, 85, 88, 90, 92],
+                            borderColor: '#238636',
+                            borderDash: [5, 5],
+                            fill: false,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#c9d1d9', font: { family: 'Fira Code' } } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' } },
+                        y: { ticks: { color: '#8b949e' }, grid: { color: '#30363d' }, min: 60, max: 100 }
+                    }
+                }
+            });
+
+            // Chart 2: Issues Distribution
+            const ctx2 = document.getElementById('chart-issues-distribution').getContext('2d');
+            new Chart(ctx2, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Lint Formatting', 'Security Secrets', 'Low Coverage', 'Complex Logic'],
+                    datasets: [{
+                        data: [45, 20, 25, 10],
+                        backgroundColor: ['#58a6ff', '#da3633', '#d29922', '#8957e5'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#c9d1d9', font: { family: 'Inter' } } }
+                    }
+                }
+            });
+        }
